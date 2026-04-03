@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Starsound Integration Scheduler</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #232734;
+    --border: #2e3345;
+    --text: #e4e6f0;
+    --text-dim: #8b8fa3;
+    --accent: #6c5ce7;
+    --accent-light: #a29bfe;
+    --danger: #e74c3c;
+    --warning: #f39c12;
+    --success: #00b894;
+    --phase-design: #6c5ce7;
+    --phase-engineering: #0984e3;
+    --phase-procurement: #f39c12;
+    --phase-install: #00b894;
+    --phase-programming: #fd79a8;
+    --phase-closeout: #e74c3c;
+    --sidebar-w: 320px;
+    --row-h: 52px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); overflow: hidden; height: 100vh;
+  }
+
+  /* TOP BAR */
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 20px; height:52px; background:var(--surface);
+    border-bottom:1px solid var(--border); z-index:100; position:relative;
+  }
+  .topbar-left { display:flex; align-items:center; gap:14px; }
+  .topbar-logo {
+    font-size:17px; font-weight:700;
+    background:linear-gradient(135deg,var(--accent),var(--accent-light));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .topbar-divider { width:1px; height:22px; background:var(--border); }
+  .topbar-title { font-size:13px; color:var(--text-dim); }
+  .topbar-actions { display:flex; gap:6px; align-items:center; }
+
+  .btn {
+    padding:7px 14px; border:1px solid var(--border); border-radius:7px;
+    background:var(--surface2); color:var(--text); font-size:12px; font-weight:500;
+    cursor:pointer; transition:all .15s; display:inline-flex; align-items:center; gap:5px;
+  }
+  .btn:hover { background:var(--border); }
+  .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-light); }
+  .btn-danger { background:var(--danger); border-color:var(--danger); color:#fff; }
+  .btn-danger:hover { opacity:.85; }
+  .btn-sm { padding:4px 9px; font-size:11px; }
+
+  .legend { display:flex; align-items:center; gap:12px; margin-right:8px; }
+  .legend-item { display:flex; align-items:center; gap:4px; font-size:10px; color:var(--text-dim); }
+  .legend-dot { width:9px; height:9px; border-radius:3px; }
+
+  .zoom-controls { display:flex; align-items:center; gap:3px; }
+  .zoom-btn, .view-btn {
+    height:26px; display:flex; align-items:center; justify-content:center;
+    background:var(--surface2); border:1px solid var(--border); border-radius:5px;
+    color:var(--text-dim); cursor:pointer; font-size:11px; font-weight:600; transition:all .15s;
+  }
+  .zoom-btn { width:26px; font-size:14px; }
+  .view-btn { padding:0 7px; }
+  .zoom-btn:hover, .view-btn:hover { background:var(--border); color:var(--text); }
+  .view-btn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  /* CONFLICT BANNER */
+  .conflict-banner {
+    display:none; padding:6px 20px; background:rgba(243,156,18,.12);
+    border-bottom:1px solid rgba(243,156,18,.25); font-size:12px; color:var(--warning);
+    align-items:center; gap:6px;
+  }
+  .conflict-banner.show { display:flex; }
+
+  /* FILTER BAR */
+  .filter-bar {
+    display:flex; align-items:center; gap:8px; padding:6px 14px;
+    background:var(--surface); border-bottom:1px solid var(--border); font-size:11px;
+  }
+  .filter-bar select {
+    padding:3px 6px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:5px; color:var(--text); font-size:11px; cursor:pointer;
+  }
+  .filter-bar label { color:var(--text-dim); font-weight:500; }
+
+  /* MAIN LAYOUT */
+  .main { display:flex; height:calc(100vh - 52px); }
+  .main.has-conflict { height:calc(100vh - 52px - 30px); }
+  .main.has-filter { height:calc(100vh - 52px - 34px); }
+  .main.has-both { height:calc(100vh - 52px - 64px); }
+
+  /* SIDEBAR */
+  .sidebar {
+    width:var(--sidebar-w); min-width:var(--sidebar-w); background:var(--surface);
+    border-right:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden;
+  }
+  .sidebar-header {
+    display:flex; align-items:flex-end; padding:0 14px 8px;
+    border-bottom:1px solid var(--border);
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; color:var(--text-dim);
+    flex-shrink:0;
+    /* Height set dynamically via JS to match gantt header */
+  }
+  .sidebar-rows {
+    flex:1; overflow-y:auto; overflow-x:hidden;
+    scrollbar-width:none; /* Firefox */
+  }
+  .sidebar-rows::-webkit-scrollbar { display:none; } /* Chrome/Safari */
+  .sidebar-row {
+    height:var(--row-h); display:flex; align-items:center; padding:0 14px;
+    border-bottom:1px solid var(--border); cursor:pointer; transition:background .1s; gap:8px;
+  }
+  .sidebar-row:hover { background:var(--surface2); }
+  .sidebar-row.selected { background:rgba(108,92,231,.12); }
+  .sidebar-row .phase-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .sidebar-row .project-name {
+    font-size:12px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;
+  }
+  .sidebar-row .project-meta { font-size:10px; color:var(--text-dim); white-space:nowrap; }
+
+  /* EXPAND TOGGLE */
+  .expand-toggle {
+    width:18px; height:18px; display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; cursor:pointer; color:var(--text-dim); font-size:10px;
+    border-radius:4px; transition:all .15s; border:none; background:none; padding:0;
+  }
+  .expand-toggle:hover { background:var(--border); color:var(--text); }
+  .expand-toggle.open { transform:rotate(90deg); }
+  .expand-toggle.no-children { visibility:hidden; }
+
+  /* SUB-PHASE CHILD ROW */
+  .sidebar-row.child-row {
+    padding-left:36px; background:rgba(255,255,255,.015);
+    height:40px;
+  }
+  .sidebar-row.child-row .project-name { font-size:11px; font-weight:400; color:var(--text-dim); }
+  .sidebar-row.child-row .phase-dot { width:7px; height:7px; }
+  .sidebar-row.child-row .sp-team-label { font-size:9px; color:var(--text-dim); white-space:nowrap; }
+
+  .conflict-icon { color:var(--warning); font-size:13px; flex-shrink:0; animation:pulse 1.5s infinite; }
+  .dep-icon { color:var(--accent-light); font-size:10px; flex-shrink:0; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* SUB-PHASE MINI BAR */
+  .gantt-sp-bar {
+    position:absolute; height:22px; border-radius:4px; z-index:6;
+    display:flex; align-items:center; padding:0 6px;
+    font-size:10px; font-weight:500; color:#fff; overflow:hidden;
+    white-space:nowrap; text-overflow:ellipsis; opacity:.9;
+  }
+
+  /* GANTT AREA */
+  .gantt-wrapper { flex:1; overflow:auto; position:relative; }
+  .gantt-header {
+    position:sticky; top:0; z-index:10; background:var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .gantt-header-months { display:flex; height:28px; align-items:center; border-bottom:1px solid var(--border); }
+  .gantt-month {
+    font-size:11px; font-weight:600; color:var(--text); text-align:center;
+    border-right:1px solid var(--border); height:100%; display:flex; align-items:center; justify-content:center;
+    overflow:hidden; white-space:nowrap;
+  }
+  .gantt-header-days { display:flex; height:32px; align-items:center; }
+  .gantt-day-cell {
+    text-align:center; font-size:10px; color:var(--text-dim);
+    border-right:1px solid rgba(46,51,69,.3); display:flex; flex-direction:column;
+    align-items:center; justify-content:center; height:100%; overflow:hidden;
+  }
+  .gantt-day-cell.weekend { background:rgba(255,255,255,.02); color:rgba(139,143,163,.5); }
+  .gantt-day-cell.today { color:var(--accent-light); font-weight:700; }
+  .gantt-day-cell .dn { font-size:11px; line-height:1.1; }
+  .gantt-day-cell .dl { font-size:8px; text-transform:uppercase; line-height:1; margin-top:1px; }
+
+  .gantt-body { position:relative; }
+
+  /* WEEKEND COLUMNS */
+  .weekend-stripe {
+    position:absolute; top:0; bottom:0; background:rgba(255,255,255,.015); pointer-events:none;
+  }
+
+  /* TODAY LINE */
+  .today-line {
+    position:absolute; top:0; bottom:0; width:2px; background:var(--accent-light);
+    z-index:5; pointer-events:none;
+  }
+  .today-marker {
+    position:absolute; top:-24px; font-size:9px; color:var(--accent-light);
+    font-weight:600; white-space:nowrap; transform:translateX(-50%);
+  }
+
+  /* GANTT BARS */
+  .gantt-bar-group {
+    position:absolute; height:30px; cursor:grab; z-index:6; user-select:none;
+    transition:box-shadow .15s;
+  }
+  .gantt-bar-group:hover { z-index:7; }
+  .gantt-bar-group:hover .bar-segment { box-shadow:0 4px 16px rgba(0,0,0,.4); }
+  .gantt-bar-group.dragging { opacity:.85; cursor:grabbing; z-index:20; }
+  .gantt-bar-group.dragging .bar-segment { box-shadow:0 8px 32px rgba(0,0,0,.5); }
+
+  .bar-segment {
+    position:absolute; top:0; height:30px; border-radius:5px;
+    display:flex; align-items:center; padding:0 6px; overflow:hidden;
+  }
+  .bar-segment.solid { }
+  .bar-segment.gap {
+    background:repeating-linear-gradient(
+      90deg, transparent, transparent 4px, rgba(255,255,255,.08) 4px, rgba(255,255,255,.08) 8px
+    ) !important;
+    border:1px dashed rgba(255,255,255,.2);
+    border-radius:0;
+  }
+
+  .bar-label-overlay {
+    position:absolute; top:0; left:0; right:0; bottom:0;
+    display:flex; align-items:center; padding:0 8px;
+    font-size:11px; font-weight:600; color:#fff;
+    pointer-events:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  .gantt-bar-group .resize-handle {
+    position:absolute; top:0; bottom:0; width:8px; cursor:col-resize; z-index:2;
+  }
+  .gantt-bar-group .resize-handle.left { left:0; }
+  .gantt-bar-group .resize-handle.right { right:0; }
+
+  /* DEPENDENCY ARROWS (SVG overlay) */
+  .dep-svg {
+    position:absolute; top:0; left:0; pointer-events:none; z-index:4;
+  }
+  .dep-line { fill:none; stroke:var(--accent-light); stroke-width:1.5; }
+  .dep-arrow { fill:var(--accent-light); }
+
+  /* DETAIL PANEL */
+  .detail-overlay {
+    display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,.5); z-index:200;
+  }
+  .detail-overlay.open { display:block; }
+  .detail-panel {
+    position:fixed; top:0; right:0; bottom:0; width:420px;
+    background:var(--surface); border-left:1px solid var(--border); z-index:201;
+    display:flex; flex-direction:column; transform:translateX(100%); transition:transform .25s ease;
+  }
+  .detail-overlay.open .detail-panel { transform:translateX(0); }
+  .detail-panel-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px; border-bottom:1px solid var(--border);
+  }
+  .detail-panel-header h2 { font-size:15px; font-weight:600; }
+  .detail-panel-body { flex:1; overflow-y:auto; padding:18px; }
+  .form-group { margin-bottom:16px; }
+  .form-group label {
+    display:block; font-size:11px; font-weight:600; color:var(--text-dim);
+    margin-bottom:5px; text-transform:uppercase; letter-spacing:.3px;
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    width:100%; padding:9px 11px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:7px; color:var(--text); font-size:13px; font-family:inherit; outline:none;
+    transition:border-color .15s;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:var(--accent); }
+  .form-group textarea { resize:vertical; min-height:70px; }
+  .form-group select { cursor:pointer; }
+  .form-group select option { background:var(--surface2); }
+  .form-row { display:flex; gap:10px; }
+  .form-row .form-group { flex:1; }
+
+  .team-chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
+  .team-chip {
+    display:inline-flex; align-items:center; gap:3px; padding:3px 9px;
+    background:var(--surface2); border:1px solid var(--border); border-radius:14px;
+    font-size:11px; cursor:pointer; transition:all .15s;
+  }
+  .team-chip.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .team-chip:hover { border-color:var(--accent); }
+
+  /* DEPENDENCY CHIPS */
+  .dep-chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
+  .dep-chip {
+    display:inline-flex; align-items:center; gap:3px; padding:3px 9px;
+    background:var(--surface2); border:1px solid var(--border); border-radius:14px;
+    font-size:11px; cursor:pointer; transition:all .15s;
+  }
+  .dep-chip.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .dep-chip:hover { border-color:var(--accent); }
+
+  .sub-phase-row {
+    margin-bottom:6px; padding:8px; background:var(--surface2);
+    border:1px solid var(--border); border-radius:7px;
+  }
+  .sp-top { display:flex; gap:6px; align-items:center; }
+  .sub-phase-row select, .sub-phase-row input {
+    padding:5px 6px; background:var(--bg); border:1px solid var(--border); border-radius:5px;
+    color:var(--text); font-size:11px; font-family:inherit;
+  }
+  .sub-phase-row select { width:110px; }
+  .sub-phase-row input[type="date"] { width:120px; }
+  .sub-phase-row .sp-remove {
+    width:22px; height:22px; display:flex; align-items:center; justify-content:center;
+    background:none; border:1px solid var(--border); border-radius:4px; color:var(--text-dim);
+    cursor:pointer; font-size:13px; flex-shrink:0;
+  }
+  .sub-phase-row .sp-remove:hover { color:var(--danger); border-color:var(--danger); }
+  .sub-phase-row .sp-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .sp-team { display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; padding-left:14px; }
+  .sp-team-chip {
+    padding:2px 7px; font-size:10px; border-radius:10px; cursor:pointer;
+    background:var(--bg); border:1px solid var(--border); color:var(--text-dim); transition:all .15s;
+  }
+  .sp-team-chip.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .detail-panel-footer {
+    padding:14px 18px; border-top:1px solid var(--border);
+    display:flex; gap:8px; justify-content:space-between;
+  }
+
+  /* TEAM MODAL */
+  .team-modal {
+    display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:440px; max-height:80vh; background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; z-index:300; overflow:hidden;
+  }
+  .team-modal.open { display:flex; flex-direction:column; }
+  .team-modal-header {
+    padding:18px; border-bottom:1px solid var(--border); display:flex;
+    align-items:center; justify-content:space-between;
+  }
+  .team-modal-header h2 { font-size:15px; }
+  .team-modal-body { padding:18px; overflow-y:auto; flex:1; }
+  .team-member-row {
+    display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border);
+  }
+  .team-member-row:last-child { border-bottom:none; }
+  .team-member-avatar {
+    width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; color:#fff; flex-shrink:0;
+  }
+  .team-member-info { flex:1; }
+  .team-member-name { font-size:13px; font-weight:500; }
+  .team-member-projects { font-size:11px; color:var(--text-dim); }
+  .team-add-row { display:flex; gap:8px; margin-top:14px; }
+  .team-add-row input {
+    flex:1; padding:8px 11px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:7px; color:var(--text); font-size:13px;
+  }
+  .modal-backdrop {
+    display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+    background:rgba(0,0,0,.5); z-index:299;
+  }
+  .modal-backdrop.open { display:block; }
+
+  .toast {
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(80px);
+    padding:8px 18px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:9px; font-size:12px; z-index:500; transition:transform .3s ease; pointer-events:none;
+  }
+  .toast.show { transform:translateX(-50%) translateY(0); }
+
+  ::-webkit-scrollbar { width:7px; height:7px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <span class="topbar-logo">Starsound</span>
+    <span class="topbar-divider"></span>
+    <span class="topbar-title">Integration Scheduler</span>
+  </div>
+  <div class="topbar-actions">
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-design)"></div>Design</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-engineering)"></div>Engineering</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-procurement)"></div>Procurement</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-install)"></div>Install</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-programming)"></div>Programming</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--phase-closeout)"></div>Closeout</div>
+    </div>
+    <div class="zoom-controls">
+      <button class="zoom-btn" onclick="zoomOut()">&#8722;</button>
+      <button class="view-btn active" onclick="setView('day')" data-view="day">Day</button>
+      <button class="view-btn" onclick="setView('week')" data-view="week">Wk</button>
+      <button class="view-btn" onclick="setView('month')" data-view="month">Mo</button>
+      <button class="view-btn" onclick="setView('quarter')" data-view="quarter">Qtr</button>
+      <button class="view-btn" onclick="setView('year')" data-view="year">Yr</button>
+      <button class="zoom-btn" onclick="zoomIn()">+</button>
+    </div>
+    <button class="btn" onclick="openTeamModal()">Team</button>
+    <span id="syncStatus" style="font-size:10px;font-weight:600;padding:0 4px;color:var(--text-dim)">Connecting...</span>
+    <button class="btn" onclick="openSettingsModal()">Settings</button>
+    <button class="btn btn-primary" onclick="openDetailPanel(null)">+ Project</button>
+    <button class="btn" onclick="exportData()" title="Export backup JSON">Backup</button>
+    <button class="btn" onclick="document.getElementById('importInput').click()" title="Import from backup JSON">Import</button>
+    <input type="file" id="importInput" accept=".json" style="display:none" onchange="importData(event)">
+  </div>
+</div>
+
+<div class="conflict-banner" id="conflictBanner">
+  <span>&#9888;</span> <span id="conflictText"></span>
+</div>
+
+<div class="filter-bar">
+  <label>Phase:</label>
+  <select id="filterPhase" onchange="renderAll()">
+    <option value="all">All</option>
+    <option value="design">Design</option><option value="engineering">Engineering</option>
+    <option value="procurement">Procurement</option><option value="install">Install</option>
+    <option value="programming">Programming</option><option value="closeout">Closeout</option>
+  </select>
+  <label style="margin-left:10px">Member:</label>
+  <select id="filterMember" onchange="renderAll()"><option value="all">All</option></select>
+  <label style="margin-left:10px">Sort:</label>
+  <select id="sortBy" onchange="renderAll()">
+    <option value="start">Start Date</option><option value="name">Name</option>
+    <option value="phase">Phase</option><option value="priority">Priority</option>
+  </select>
+</div>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">Projects</div>
+    <div class="sidebar-rows" id="sidebarRows"></div>
+  </div>
+  <div class="gantt-wrapper" id="ganttWrapper">
+    <div class="gantt-header" id="ganttHeader">
+      <div class="gantt-header-months" id="ganttMonths"></div>
+      <div class="gantt-header-days" id="ganttDays"></div>
+    </div>
+    <div class="gantt-body" id="ganttBody"></div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetailPanel()">
+  <div class="detail-panel" onclick="event.stopPropagation()">
+    <div class="detail-panel-header">
+      <h2 id="detailTitle">New Project</h2>
+      <button class="btn btn-sm" onclick="closeDetailPanel()">&times;</button>
+    </div>
+    <div class="detail-panel-body">
+      <div class="form-group">
+        <label>Project Name</label>
+        <input type="text" id="pName" placeholder="e.g. Meridian HQ Boardroom">
+      </div>
+      <div class="form-group">
+        <label>Client / Site</label>
+        <input type="text" id="pClient" placeholder="e.g. Meridian Health - HQ Bldg A">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Current Phase</label>
+          <select id="pPhase">
+            <option value="design">Design</option><option value="engineering">Engineering</option>
+            <option value="procurement">Procurement</option><option value="install">Install</option>
+            <option value="programming">Programming</option><option value="closeout">Closeout</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="pPriority">
+            <option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Project Start</label>
+          <input type="date" id="pStart">
+        </div>
+        <div class="form-group">
+          <label>Project End</label>
+          <input type="date" id="pEnd">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Phase Schedule <span style="font-weight:400;text-transform:none">(sub-phases within this project)</span></label>
+        <div id="subPhaseList" style="margin-bottom:8px"></div>
+        <button class="btn btn-sm" onclick="addSubPhaseRow()" style="margin-top:2px">+ Add Phase Block</button>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px">
+          Gaps between phase blocks appear as dashed segments on the Gantt. Other projects can fill those gaps.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Assigned Team Members</label>
+        <div class="team-chips" id="teamChips"></div>
+      </div>
+      <div class="form-group">
+        <label>Depends On (blocks this project)</label>
+        <div class="dep-chips" id="depChips"></div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:4px">
+          Select projects that must finish before this one starts. Moving a parent auto-shifts this project.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="pNotes" placeholder="Add notes about this project..."></textarea>
+      </div>
+    </div>
+    <div class="detail-panel-footer">
+      <button class="btn btn-danger" id="deleteBtn" onclick="deleteProject()">Delete</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn" onclick="closeDetailPanel()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveProject()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TEAM MODAL -->
+<div class="modal-backdrop" id="teamBackdrop" onclick="closeTeamModal()"></div>
+<div class="team-modal" id="teamModal">
+  <div class="team-modal-header">
+    <h2>Team Members</h2>
+    <button class="btn btn-sm" onclick="closeTeamModal()">&times;</button>
+  </div>
+  <div class="team-modal-body">
+    <div id="teamList"></div>
+    <div class="team-add-row">
+      <input type="text" id="newMemberName" placeholder="New team member name"
+             onkeydown="if(event.key==='Enter')addMember()">
+      <button class="btn btn-primary btn-sm" onclick="addMember()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-backdrop" id="settingsBackdrop" onclick="closeSettingsModal()"></div>
+<div class="team-modal" id="settingsModal">
+  <div class="team-modal-header">
+    <h2>Settings</h2>
+    <button class="btn btn-sm" onclick="closeSettingsModal()">&times;</button>
+  </div>
+  <div class="team-modal-body">
+    <div class="form-group">
+      <label>Slack Webhook URL</label>
+      <input type="text" id="slackWebhook" placeholder="https://hooks.slack.com/services/T.../B.../..."
+             style="font-size:12px" value="">
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px">
+        When set, the app auto-sends a Slack notification when team members are assigned to new projects or phases.
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Slack Channel Name (display only)</label>
+      <input type="text" id="slackChannelName" placeholder="#integrations" value="">
+    </div>
+    <div class="form-group">
+      <label>Slack Notifications</label>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
+          <input type="checkbox" id="slackOnAssign" checked> New assignments
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer">
+          <input type="checkbox" id="slackOnMove" checked> Date changes
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="btn btn-primary btn-sm" onclick="testSlack()">Test Slack Connection</button>
+      <button class="btn btn-sm" onclick="saveSettings()" style="margin-left:6px">Save Settings</button>
+    </div>
+    <div style="margin-top:16px;padding:12px;background:var(--bg);border-radius:7px;font-size:11px;color:var(--text-dim);line-height:1.5">
+      <strong style="color:var(--text)">Setup Instructions:</strong><br>
+      1. Go to <strong>api.slack.com/apps</strong> &rarr; Create New App &rarr; From Scratch<br>
+      2. Name it "Starsound Scheduler" and select your workspace<br>
+      3. Go to <strong>Incoming Webhooks</strong> &rarr; Activate &rarr; Add New Webhook<br>
+      4. Select a channel (e.g. #integrations) and copy the webhook URL<br>
+      5. Paste it above and hit Save Settings
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ========== SUPABASE CONFIG ==========
+const SUPABASE_URL = 'https://wwqxrhgztzurnahuubsw.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind3cXhyaGd6dHp1cm5haHV1YnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMzk1OTYsImV4cCI6MjA5MDgxNTU5Nn0.gZ7bFwz3wbgE6aq-Rv4fWRFq5VOKLWueLahshvTC8ZM';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let saving = false;
+let saveQueued = false;
+let lastSavedJSON = '';
+const syncStatusEl = () => document.getElementById('syncStatus');
+
+// ========== STATE ==========
+let state = {
+  projects: [],
+  team: ['Alex', 'Jordan', 'Sam', 'Taylor'],
+  nextId: 1
+};
+
+let editingProjectId = null;
+let dayWidth = 44;
+let currentView = 'day';
+const expandedProjects = new Set(); // track which projects have sub-phases expanded
+
+const MIN_DAY_W = 3;
+const MAX_DAY_W = 110;
+const VIEW_PRESETS = { day: 44, week: 80, month: 18, quarter: 10, year: 3 };
+
+const phaseColors = {
+  design:'var(--phase-design)', engineering:'var(--phase-engineering)',
+  procurement:'var(--phase-procurement)', install:'var(--phase-install)',
+  programming:'var(--phase-programming)', closeout:'var(--phase-closeout)'
+};
+const phaseOrder = ['design','engineering','procurement','install','programming','closeout'];
+
+const DAY_NAMES_FULL = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const DAY_NAMES_SHORT = ['S','M','T','W','T','F','S'];
+
+// ========== DATE HELPERS ==========
+function todayDate() { return stripTime(new Date()); }
+function stripTime(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate()+n); return r; }
+function diffDays(a, b) { return Math.round((b-a)/864e5); }
+function fmtDate(d) { return d.toISOString().split('T')[0]; }
+function parseDate(s) { const p=s.split('-'); return new Date(p[0],p[1]-1,p[2]); }
+function monthName(d) { return d.toLocaleString('default',{month:'short'}); }
+function isWeekend(d) { return d.getDay()===0||d.getDay()===6; }
+
+function getTimelineStart() { const t=todayDate(); return new Date(t.getFullYear(),t.getMonth(),1); }
+function getTimelineEnd() { const s=getTimelineStart(); return new Date(s.getFullYear(),s.getMonth()+13,0); }
+function getTimelineDays() {
+  const s=getTimelineStart(), e=getTimelineEnd(), days=[];
+  let d=new Date(s); while(d<=e){days.push(new Date(d));d=addDays(d,1);} return days;
+}
+
+// ========== DEPENDENCY HELPERS ==========
+function getDependents(projectId) {
+  // Returns all projects that depend on projectId (direct + transitive)
+  const result = [];
+  const visited = new Set();
+  function walk(id) {
+    state.projects.forEach(p => {
+      if (p.deps && p.deps.includes(id) && !visited.has(p.id)) {
+        visited.add(p.id);
+        result.push(p);
+        walk(p.id);
+      }
+    });
+  }
+  walk(projectId);
+  return result;
+}
+
+function cascadeDependencies(movedProject, daysDelta) {
+  // When a project moves, shift all its dependents by the same delta
+  const dependents = getDependents(movedProject.id);
+  dependents.forEach(dep => {
+    const ds = parseDate(dep.start), de = parseDate(dep.end);
+    dep.start = fmtDate(addDays(ds, daysDelta));
+    dep.end = fmtDate(addDays(de, daysDelta));
+    // Also shift sub-phases
+    if(dep.subPhases){
+      dep.subPhases.forEach(sp=>{
+        sp.start=fmtDate(addDays(parseDate(sp.start),daysDelta));
+        sp.end=fmtDate(addDays(parseDate(sp.end),daysDelta));
+      });
+    }
+  });
+
+  // Also enforce: dependent start >= max(parent ends)
+  dependents.forEach(dep => {
+    if (!dep.deps || dep.deps.length === 0) return;
+    let latestParentEnd = null;
+    dep.deps.forEach(pid => {
+      const parent = state.projects.find(p => p.id === pid);
+      if (parent) {
+        const pe = parseDate(parent.end);
+        if (!latestParentEnd || pe > latestParentEnd) latestParentEnd = pe;
+      }
+    });
+    if (latestParentEnd) {
+      const depStart = parseDate(dep.start);
+      const requiredStart = addDays(latestParentEnd, 1);
+      if (depStart < requiredStart) {
+        const dur = diffDays(parseDate(dep.start), parseDate(dep.end));
+        dep.start = fmtDate(requiredStart);
+        dep.end = fmtDate(addDays(requiredStart, dur));
+      }
+    }
+  });
+}
+
+// ========== CONFLICT DETECTION ==========
+function detectConflicts() {
+  const conflicts = [];
+  for (let i=0; i<state.projects.length; i++) {
+    for (let j=i+1; j<state.projects.length; j++) {
+      const a=state.projects[i], b=state.projects[j];
+      const aS=parseDate(a.start), aE=parseDate(a.end), bS=parseDate(b.start), bE=parseDate(b.end);
+      if (aS<=bE && bS<=aE) {
+        const shared = a.team.filter(m=>b.team.includes(m));
+        if (shared.length>0) conflicts.push({projectA:a.name, projectB:b.name, members:shared});
+      }
+    }
+  }
+  return conflicts;
+}
+
+function updateConflictBanner() {
+  const conflicts=detectConflicts();
+  const banner=document.getElementById('conflictBanner'), text=document.getElementById('conflictText');
+  if (conflicts.length>0) {
+    const msg = conflicts[0];
+    text.textContent=`${conflicts.length} conflict${conflicts.length>1?'s':''}: ${msg.members.join(', ')} on "${msg.projectA}" & "${msg.projectB}"${conflicts.length>1?' (+' +(conflicts.length-1)+' more)':''}`;
+    banner.classList.add('show');
+  } else banner.classList.remove('show');
+  return conflicts;
+}
+
+// ========== FILTERING ==========
+function getFilteredProjects() {
+  let projects=[...state.projects];
+  const phase=document.getElementById('filterPhase').value;
+  const member=document.getElementById('filterMember').value;
+  if(phase!=='all') projects=projects.filter(p=>p.phase===phase);
+  if(member!=='all') projects=projects.filter(p=>p.team.includes(member));
+  const sort=document.getElementById('sortBy').value;
+  projects.sort((a,b)=>{
+    if(sort==='start') return parseDate(a.start)-parseDate(b.start);
+    if(sort==='name') return a.name.localeCompare(b.name);
+    if(sort==='phase') return phaseOrder.indexOf(a.phase)-phaseOrder.indexOf(b.phase);
+    if(sort==='priority'){const o={high:0,medium:1,low:2};return o[a.priority]-o[b.priority];}
+    return 0;
+  });
+  return projects;
+}
+
+function updateMemberFilter() {
+  const sel=document.getElementById('filterMember'), cur=sel.value;
+  sel.innerHTML='<option value="all">All</option>';
+  state.team.forEach(m=>{sel.innerHTML+=`<option value="${m}" ${cur===m?'selected':''}>${m}</option>`;});
+}
+
+// ========== RENDER ==========
+let _initialLoadDone = false;
+function renderAll() {
+  const conflicts=updateConflictBanner();
+  const conflictNames=new Set();
+  conflicts.forEach(c=>{conflictNames.add(c.projectA);conflictNames.add(c.projectB);});
+  renderSidebar(conflictNames);
+  renderGantt(conflictNames);
+  updateMemberFilter();
+  syncHeaderHeight();
+  // Auto-save to Supabase on every render (debounced inside autoSave)
+  if(_initialLoadDone) autoSave();
+}
+
+function syncHeaderHeight(){
+  // Match sidebar header height to gantt header height exactly
+  requestAnimationFrame(()=>{
+    const gh=document.getElementById('ganttHeader');
+    const sh=document.querySelector('.sidebar-header');
+    if(gh&&sh) sh.style.height=gh.offsetHeight+'px';
+  });
+}
+
+// Build a flat list of display rows: [{type:'project', project, rowH:52}, {type:'subphase', project, sp, spIdx, rowH:40}, ...]
+function buildDisplayRows(){
+  const projects=getFilteredProjects();
+  const rows=[];
+  projects.forEach(p=>{
+    rows.push({type:'project', project:p, rowH:52});
+    if(expandedProjects.has(p.id) && p.subPhases && p.subPhases.length>0){
+      const subs=[...p.subPhases].sort((a,b)=>parseDate(a.start)-parseDate(b.start));
+      subs.forEach((sp,si)=>{
+        rows.push({type:'subphase', project:p, sp, spIdx:si, rowH:40});
+      });
+    }
+  });
+  return rows;
+}
+
+function toggleExpand(id, e){
+  e.stopPropagation();
+  if(expandedProjects.has(id)) expandedProjects.delete(id);
+  else expandedProjects.add(id);
+  renderAll();
+}
+
+function renderSidebar(conflictNames) {
+  const rows=buildDisplayRows();
+  document.getElementById('sidebarRows').innerHTML=rows.map(r=>{
+    if(r.type==='project'){
+      const p=r.project;
+      const hasSubs = p.subPhases && p.subPhases.length>0;
+      const isOpen = expandedProjects.has(p.id);
+      const hasDeps = p.deps && p.deps.length > 0;
+      const depCount = getDependents(p.id).length;
+      return `<div class="sidebar-row ${editingProjectId===p.id?'selected':''}" style="height:${r.rowH}px" onclick="openDetailPanel(${p.id})">
+        <button class="expand-toggle ${isOpen?'open':''} ${hasSubs?'':'no-children'}" onclick="toggleExpand(${p.id},event)">&#9654;</button>
+        <div class="phase-dot" style="background:${phaseColors[p.phase]}"></div>
+        <span class="project-name">${p.name}</span>
+        ${conflictNames.has(p.name)?'<span class="conflict-icon">&#9888;</span>':''}
+        ${hasDeps?'<span class="dep-icon" title="Has dependencies">&#9741;</span>':''}
+        ${depCount>0?'<span class="dep-icon" title="'+depCount+' project(s) depend on this">&#8594;'+depCount+'</span>':''}
+        <span class="project-meta">${p.team.length?p.team.length+'p':''}</span>
+      </div>`;
+    } else {
+      const sp=r.sp;
+      const phaseName=sp.phase.charAt(0).toUpperCase()+sp.phase.slice(1);
+      const teamLabel=(sp.team&&sp.team.length>0)?sp.team.join(', '):'';
+      return `<div class="sidebar-row child-row" style="height:${r.rowH}px" onclick="openDetailPanel(${r.project.id})">
+        <div class="phase-dot" style="background:${phaseColors[sp.phase]}"></div>
+        <span class="project-name">${phaseName}</span>
+        <span class="sp-team-label">${teamLabel}</span>
+        <span class="project-meta">${sp.start.slice(5)} &ndash; ${sp.end.slice(5)}</span>
+      </div>`;
+    }
+  }).join('');
+}
+
+function renderGantt(conflictNames) {
+  const days=getTimelineDays();
+  const tlStart=getTimelineStart();
+  const projects=getFilteredProjects();
+  const todayStr=fmtDate(todayDate());
+
+  // === MONTHS ===
+  const monthsEl=document.getElementById('ganttMonths');
+  let mHTML='', mi=0;
+  while(mi<days.length){
+    const mo=days[mi].getMonth(), yr=days[mi].getFullYear();
+    let cnt=0;
+    while(mi+cnt<days.length && days[mi+cnt].getMonth()===mo) cnt++;
+    const w=cnt*dayWidth;
+    const label = w > 60 ? monthName(days[mi])+' '+yr : w > 30 ? monthName(days[mi]) : '';
+    mHTML+=`<div class="gantt-month" style="width:${w}px">${label}</div>`;
+    mi+=cnt;
+  }
+  monthsEl.innerHTML=mHTML;
+
+  // === DAYS ===
+  const daysEl=document.getElementById('ganttDays');
+  if(dayWidth>=20) {
+    // Full day view: each day is a cell with day number + day name
+    daysEl.style.display='flex';
+    daysEl.innerHTML=days.map(d=>{
+      const we=isWeekend(d);
+      const isToday=fmtDate(d)===todayStr;
+      const cls=['gantt-day-cell',we?'weekend':'',isToday?'today':''].filter(Boolean).join(' ');
+      const dayNum=d.getDate();
+      const dayNameStr = dayWidth>=36 ? DAY_NAMES_FULL[d.getDay()] : DAY_NAMES_SHORT[d.getDay()];
+      return `<div class="${cls}" style="width:${dayWidth}px;min-width:${dayWidth}px">
+        <div class="dn">${dayNum}</div>
+        <div class="dl">${dayNameStr}</div>
+      </div>`;
+    }).join('');
+  } else if(dayWidth>=8) {
+    // Compressed: show week start markers
+    daysEl.style.display='flex';
+    let dHTML='', di=0;
+    while(di<days.length){
+      const d=days[di], dow=d.getDay();
+      const daysUntilSun = dow===0?7:(7-dow);
+      const wDays=Math.min(daysUntilSun||7, days.length-di);
+      const ww=wDays*dayWidth;
+      const isToday=days.slice(di,di+wDays).some(dd=>fmtDate(dd)===todayStr);
+      dHTML+=`<div class="gantt-day-cell ${isToday?'today':''}" style="width:${ww}px;min-width:${ww}px;border-right:1px solid var(--border)">
+        <div class="dn" style="font-size:9px">${d.getDate()}</div>
+      </div>`;
+      di+=wDays;
+    }
+    daysEl.innerHTML=dHTML;
+  } else {
+    daysEl.style.display='none';
+  }
+
+  // === BODY (uses display rows for proper expand/collapse) ===
+  const displayRows=buildDisplayRows();
+  const bodyEl=document.getElementById('ganttBody');
+  const totalW=days.length*dayWidth;
+
+  // Compute cumulative Y positions for each row
+  let cumY=0;
+  const rowTops=[];
+  displayRows.forEach(r=>{ rowTops.push(cumY); cumY+=r.rowH; });
+  const totalH=cumY+20;
+
+  bodyEl.style.width=totalW+'px';
+  bodyEl.style.height=totalH+'px';
+
+  let bHTML='';
+
+  // Weekend stripes
+  if(dayWidth>=4) {
+    days.forEach((d,i)=>{
+      if(isWeekend(d)) bHTML+=`<div class="weekend-stripe" style="left:${i*dayWidth}px;width:${dayWidth}px;height:${totalH}px"></div>`;
+    });
+  }
+
+  // Row separator lines
+  displayRows.forEach((_,idx)=>{
+    const y=rowTops[idx]+displayRows[idx].rowH;
+    const isChild=displayRows[idx].type==='subphase';
+    bHTML+=`<div style="position:absolute;top:${y}px;left:0;right:0;height:1px;background:${isChild?'rgba(46,51,69,.5)':'var(--border)'}"></div>`;
+  });
+
+  // Today line
+  const todayOff=diffDays(tlStart,todayDate());
+  if(todayOff>=0 && todayOff<days.length){
+    const tx=todayOff*dayWidth+dayWidth/2;
+    bHTML+=`<div class="today-line" style="left:${tx}px;height:${totalH}px"><div class="today-marker">Today</div></div>`;
+  }
+
+  // Bars
+  const MIN_BAR_W=14;
+  const barPositions={};
+
+  displayRows.forEach((r,idx)=>{
+    const rowTop=rowTops[idx];
+
+    if(r.type==='project'){
+      const p=r.project;
+      const sd=parseDate(p.start), ed=parseDate(p.end);
+      const sOff=diffDays(tlStart,sd);
+      const dur=diffDays(sd,ed)+1;
+      const left=sOff*dayWidth;
+      const rawW=dur*dayWidth;
+      const w=Math.max(MIN_BAR_W,rawW);
+      const top=rowTop+11;
+      const hasConflict=conflictNames.has(p.name);
+      const showLabel=w>50;
+      const dateRange=`${p.start} \u2013 ${p.end} (${dur}d)`;
+      const teamStr=p.team.length?' | '+p.team.join(', '):'';
+      const isExpanded=expandedProjects.has(p.id);
+
+      barPositions[p.id]={left,width:w,top,centerY:top+15};
+
+      // Build segments
+      let segHTML='';
+      const subs = (p.subPhases && p.subPhases.length>0) ? [...p.subPhases].sort((a,b)=>parseDate(a.start)-parseDate(b.start)) : null;
+
+      if(subs && !isExpanded){
+        // Show composite segments only when collapsed
+        const segments=[];
+        let cursor=parseDate(p.start);
+        subs.forEach(sp=>{
+          const spStart=parseDate(sp.start), spEnd=parseDate(sp.end);
+          if(cursor<spStart) segments.push({type:'gap',start:cursor,end:addDays(spStart,-1)});
+          segments.push({type:'solid',phase:sp.phase,start:spStart,end:spEnd});
+          cursor=addDays(spEnd,1);
+        });
+        if(cursor<=ed) segments.push({type:'gap',start:cursor,end:ed});
+        segments.forEach(seg=>{
+          const segOff=diffDays(sd,seg.start);
+          const segDur=diffDays(seg.start,seg.end)+1;
+          const segLeft=segOff*dayWidth;
+          const segW=Math.max(2,segDur*dayWidth);
+          if(seg.type==='solid'){
+            segHTML+=`<div class="bar-segment solid" style="left:${segLeft}px;width:${segW}px;background:${phaseColors[seg.phase]||phaseColors[p.phase]}"></div>`;
+          } else {
+            segHTML+=`<div class="bar-segment gap" style="left:${segLeft}px;width:${segW}px"></div>`;
+          }
+        });
+      } else if(isExpanded){
+        // When expanded, show a thin track bar spanning full duration
+        segHTML+=`<div class="bar-segment solid" style="left:0;width:${w}px;background:${phaseColors[p.phase]};opacity:.25;border-radius:5px"></div>`;
+      } else {
+        segHTML+=`<div class="bar-segment solid" style="left:0;width:${w}px;background:${phaseColors[p.phase]}"></div>`;
+      }
+
+      bHTML+=`<div class="gantt-bar-group" data-id="${p.id}"
+        title="${p.name}\n${dateRange}${teamStr}"
+        style="left:${left}px;width:${w}px;top:${top}px;height:30px;${hasConflict?'filter:drop-shadow(0 0 3px rgba(243,156,18,.7));':''}"
+        onmousedown="startDrag(event,${p.id})" ondblclick="openDetailPanel(${p.id})">
+        ${segHTML}
+        ${showLabel?`<div class="bar-label-overlay">${p.name}</div>`:''}
+        <div class="resize-handle left" onmousedown="startResize(event,${p.id},'left')"></div>
+        <div class="resize-handle right" onmousedown="startResize(event,${p.id},'right')"></div>
+      </div>`;
+
+    } else if(r.type==='subphase'){
+      // Mini gantt bar for sub-phase
+      const sp=r.sp;
+      const spStart=parseDate(sp.start), spEnd=parseDate(sp.end);
+      const sOff=diffDays(tlStart,spStart);
+      const dur=diffDays(spStart,spEnd)+1;
+      const left=sOff*dayWidth;
+      const w=Math.max(MIN_BAR_W, dur*dayWidth);
+      const top=rowTop+9;
+      const phaseName=sp.phase.charAt(0).toUpperCase()+sp.phase.slice(1);
+      const teamLabel=(sp.team&&sp.team.length>0)?' \u2022 '+sp.team.join(', '):'';
+      const showLabel=w>60;
+
+      bHTML+=`<div class="gantt-sp-bar"
+        title="${phaseName}: ${sp.start} to ${sp.end} (${dur}d)${teamLabel}"
+        style="left:${left}px;width:${w}px;top:${top}px;background:${phaseColors[sp.phase]}">
+        ${showLabel?phaseName:''}
+      </div>`;
+    }
+  });
+
+  // === DEPENDENCY ARROWS (SVG) ===
+  let svgPaths='';
+  projects.forEach(p=>{
+    if(!p.deps||p.deps.length===0) return;
+    p.deps.forEach(depId=>{
+      const from=barPositions[depId];
+      const to=barPositions[p.id];
+      if(!from||!to) return;
+      const x1=from.left+from.width, y1=from.centerY;
+      const x2=to.left, y2=to.centerY;
+      const midX=x1+(x2-x1)/2;
+      svgPaths+=`<path class="dep-line" d="M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}"/>`;
+      svgPaths+=`<polygon class="dep-arrow" points="${x2},${y2} ${x2-6},${y2-4} ${x2-6},${y2+4}"/>`;
+    });
+  });
+  if(svgPaths) bHTML+=`<svg class="dep-svg" width="${totalW}" height="${totalH}">${svgPaths}</svg>`;
+
+  bodyEl.innerHTML=bHTML;
+}
+
+// ========== DRAG & DROP ==========
+let dragState=null;
+
+function startDrag(e,id){
+  if(e.target.classList.contains('resize-handle')) return;
+  e.preventDefault();
+  const bar=document.querySelector(`.gantt-bar-group[data-id="${id}"]`);
+  dragState={type:'move',id,startX:e.clientX,origLeft:parseFloat(bar.style.left),bar};
+  bar.classList.add('dragging');
+  document.addEventListener('mousemove',onDrag);
+  document.addEventListener('mouseup',endDrag);
+}
+
+function startResize(e,id,side){
+  e.preventDefault(); e.stopPropagation();
+  const bar=document.querySelector(`.gantt-bar-group[data-id="${id}"]`);
+  dragState={type:'resize',id,side,startX:e.clientX,origLeft:parseFloat(bar.style.left),origWidth:parseFloat(bar.style.width),bar};
+  bar.classList.add('dragging');
+  document.addEventListener('mousemove',onDrag);
+  document.addEventListener('mouseup',endDrag);
+}
+
+function onDrag(e){
+  if(!dragState) return;
+  const dx=e.clientX-dragState.startX;
+  const{bar}=dragState;
+  if(dragState.type==='move'){
+    bar.style.left=(dragState.origLeft+dx)+'px';
+  } else {
+    if(dragState.side==='right'){
+      bar.style.width=Math.max(dayWidth,dragState.origWidth+dx)+'px';
+    } else {
+      bar.style.left=(dragState.origLeft+dx)+'px';
+      bar.style.width=Math.max(dayWidth,dragState.origWidth-dx)+'px';
+    }
+  }
+}
+
+function endDrag(e){
+  if(!dragState) return;
+  document.removeEventListener('mousemove',onDrag);
+  document.removeEventListener('mouseup',endDrag);
+  const{bar,id}=dragState;
+  bar.classList.remove('dragging');
+
+  const tlStart=getTimelineStart();
+  const project=state.projects.find(p=>p.id===id);
+  if(!project){dragState=null;return;}
+
+  const oldStart=parseDate(project.start);
+  const newLeft=parseFloat(bar.style.left);
+  const newWidth=parseFloat(bar.style.width);
+  const startDayOff=Math.round(newLeft/dayWidth);
+  const durDays=Math.max(1,Math.round(newWidth/dayWidth));
+  const newStart=addDays(tlStart,startDayOff);
+  const newEnd=addDays(newStart,durDays-1);
+
+  const daysDelta=diffDays(parseDate(project.start),newStart);
+
+  project.start=fmtDate(newStart);
+  project.end=fmtDate(newEnd);
+
+  // Shift sub-phases by the same delta
+  if(daysDelta!==0 && project.subPhases){
+    project.subPhases.forEach(sp=>{
+      sp.start=fmtDate(addDays(parseDate(sp.start),daysDelta));
+      sp.end=fmtDate(addDays(parseDate(sp.end),daysDelta));
+    });
+  }
+
+  // Cascade to dependents
+  if(daysDelta!==0) cascadeDependencies(project,daysDelta);
+
+  dragState=null;
+  renderAll();
+  const depCount=getDependents(id).length;
+  const depMsg=depCount>0?` (${depCount} dependent project${depCount>1?'s':''} shifted)`:'';
+  showToast(`"${project.name}" \u2192 ${project.start} \u2013 ${project.end}${depMsg}`);
+  // Slack notification for date change
+  if(daysDelta!==0) notifySlackDateChange(project.name, project.start, project.end, depCount);
+}
+
+// ========== DETAIL PANEL ==========
+function openDetailPanel(id){
+  editingProjectId=id;
+  const overlay=document.getElementById('detailOverlay');
+  const title=document.getElementById('detailTitle');
+  const deleteBtn=document.getElementById('deleteBtn');
+
+  if(id===null){
+    title.textContent='New Project';
+    deleteBtn.style.display='none';
+    document.getElementById('pName').value='';
+    document.getElementById('pClient').value='';
+    document.getElementById('pPhase').value='design';
+    document.getElementById('pPriority').value='medium';
+    document.getElementById('pStart').value=fmtDate(todayDate());
+    document.getElementById('pEnd').value=fmtDate(addDays(todayDate(),30));
+    document.getElementById('pNotes').value='';
+    editSubPhases=[];
+    renderTeamChips([]);
+    renderDepChips([], null);
+    renderSubPhaseList();
+  } else {
+    const p=state.projects.find(pr=>pr.id===id);
+    if(!p) return;
+    title.textContent='Edit Project';
+    deleteBtn.style.display='';
+    document.getElementById('pName').value=p.name;
+    document.getElementById('pClient').value=p.client||'';
+    document.getElementById('pPhase').value=p.phase;
+    document.getElementById('pPriority').value=p.priority||'medium';
+    document.getElementById('pStart').value=p.start;
+    document.getElementById('pEnd').value=p.end;
+    document.getElementById('pNotes').value=p.notes||'';
+    editSubPhases=(p.subPhases||[]).map(s=>({...s}));
+    renderTeamChips(p.team);
+    renderDepChips(p.deps||[], id);
+    renderSubPhaseList();
+  }
+  overlay.classList.add('open');
+  renderAll();
+}
+
+function closeDetailPanel(){
+  document.getElementById('detailOverlay').classList.remove('open');
+  editingProjectId=null; renderAll();
+}
+
+function renderTeamChips(selected){
+  document.getElementById('teamChips').innerHTML=state.team.map(m=>
+    `<div class="team-chip ${selected.includes(m)?'active':''}" onclick="this.classList.toggle('active')">${m}</div>`
+  ).join('');
+}
+
+function renderDepChips(selectedDeps, currentId){
+  // Show other projects as dependency options (exclude self)
+  const others = state.projects.filter(p=>p.id!==currentId);
+  if(others.length===0){
+    document.getElementById('depChips').innerHTML='<span style="font-size:11px;color:var(--text-dim)">No other projects to link yet</span>';
+    return;
+  }
+  document.getElementById('depChips').innerHTML=others.map(p=>
+    `<div class="dep-chip ${selectedDeps.includes(p.id)?'active':''}" data-dep-id="${p.id}" onclick="this.classList.toggle('active')">${p.name}</div>`
+  ).join('');
+}
+
+// ========== SUB-PHASE EDITOR ==========
+let editSubPhases = [];
+
+function renderSubPhaseList(){
+  const container = document.getElementById('subPhaseList');
+  if(editSubPhases.length===0){
+    container.innerHTML='<div style="font-size:11px;color:var(--text-dim);padding:4px 0">No phase blocks yet. The bar will show as a single solid color.</div>';
+    return;
+  }
+  const phaseColorMap={design:'#6c5ce7',engineering:'#0984e3',procurement:'#f39c12',install:'#00b894',programming:'#fd79a8',closeout:'#e74c3c'};
+  container.innerHTML=editSubPhases.map((sp,i)=>{
+    const spTeam = sp.team || [];
+    return `<div class="sub-phase-row">
+      <div class="sp-top">
+        <div class="sp-dot" style="background:${phaseColorMap[sp.phase]||'#888'}"></div>
+        <select onchange="editSubPhases[${i}].phase=this.value;renderSubPhaseList()">
+          ${phaseOrder.map(ph=>`<option value="${ph}" ${sp.phase===ph?'selected':''}>${ph.charAt(0).toUpperCase()+ph.slice(1)}</option>`).join('')}
+        </select>
+        <input type="date" value="${sp.start}" onchange="editSubPhases[${i}].start=this.value">
+        <span style="color:var(--text-dim);font-size:10px">to</span>
+        <input type="date" value="${sp.end}" onchange="editSubPhases[${i}].end=this.value">
+        <button class="sp-remove" onclick="editSubPhases.splice(${i},1);renderSubPhaseList()">&times;</button>
+      </div>
+      <div class="sp-team">
+        ${state.team.map(m=>`<span class="sp-team-chip ${spTeam.includes(m)?'active':''}" onclick="toggleSpTeam(${i},'${m}')">${m}</span>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSpTeam(spIdx, member){
+  const sp=editSubPhases[spIdx];
+  if(!sp.team) sp.team=[];
+  const idx=sp.team.indexOf(member);
+  if(idx>=0) sp.team.splice(idx,1);
+  else sp.team.push(member);
+  renderSubPhaseList();
+}
+
+function addSubPhaseRow(){
+  const pStart=document.getElementById('pStart').value;
+  const pEnd=document.getElementById('pEnd').value;
+  // Default: next available slot
+  let start=pStart, end=pEnd;
+  if(editSubPhases.length>0){
+    const last=editSubPhases[editSubPhases.length-1];
+    const lastEnd=parseDate(last.end);
+    start=fmtDate(addDays(lastEnd,2));
+    end=fmtDate(addDays(parseDate(start),6));
+    if(parseDate(end)>parseDate(pEnd)) end=pEnd;
+  }
+  // Pick next phase in order
+  const usedPhases=editSubPhases.map(s=>s.phase);
+  let nextPhase='design';
+  for(const ph of phaseOrder){
+    if(!usedPhases.includes(ph)){nextPhase=ph;break;}
+  }
+  editSubPhases.push({phase:nextPhase,start,end,team:[]});
+  renderSubPhaseList();
+}
+
+function getSelectedTeam(){
+  return Array.from(document.querySelectorAll('#teamChips .team-chip.active')).map(el=>el.textContent);
+}
+
+function getSelectedDeps(){
+  return Array.from(document.querySelectorAll('#depChips .dep-chip.active')).map(el=>parseInt(el.dataset.depId));
+}
+
+function saveProject(){
+  const name=document.getElementById('pName').value.trim();
+  if(!name){showToast('Project name is required');return;}
+
+  const data={
+    name,
+    client:document.getElementById('pClient').value.trim(),
+    phase:document.getElementById('pPhase').value,
+    priority:document.getElementById('pPriority').value,
+    start:document.getElementById('pStart').value,
+    end:document.getElementById('pEnd').value,
+    team:getSelectedTeam(),
+    deps:getSelectedDeps(),
+    subPhases:editSubPhases.filter(sp=>sp.start&&sp.end),
+    notes:document.getElementById('pNotes').value.trim()
+  };
+
+  if(parseDate(data.end)<parseDate(data.start)){showToast('End date must be after start date');return;}
+
+  if(editingProjectId===null){
+    data.id=state.nextId++;
+    state.projects.push(data);
+    showToast(`"${name}" created`);
+    // Notify Slack: all team members on new project
+    if(data.team.length>0) notifySlackAssignment(name,data.team,data.phase,data.start,data.end);
+    // Also notify per sub-phase if they have different team
+    if(data.subPhases) data.subPhases.forEach(sp=>{
+      if(sp.team&&sp.team.length>0){
+        const newInPhase=sp.team.filter(m=>!data.team.includes(m));
+        if(newInPhase.length>0) notifySlackAssignment(name,newInPhase,sp.phase,sp.start,sp.end);
+      }
+    });
+  } else {
+    const oldProject=state.projects.find(p=>p.id===editingProjectId);
+    const idx=state.projects.findIndex(p=>p.id===editingProjectId);
+    if(idx>=0){
+      data.id=editingProjectId; state.projects[idx]=data; showToast(`"${name}" updated`);
+      // Detect newly assigned team members (project level)
+      if(oldProject){
+        const newMembers=data.team.filter(m=>!oldProject.team.includes(m));
+        if(newMembers.length>0) notifySlackAssignment(name,newMembers,data.phase,data.start,data.end);
+        // Detect newly assigned per sub-phase
+        if(data.subPhases){
+          data.subPhases.forEach((sp,si)=>{
+            const oldSp = oldProject.subPhases && oldProject.subPhases[si];
+            const oldSpTeam = oldSp ? (oldSp.team||[]) : [];
+            const newInPhase = (sp.team||[]).filter(m=>!oldSpTeam.includes(m));
+            if(newInPhase.length>0) notifySlackAssignment(name,newInPhase,sp.phase,sp.start,sp.end);
+          });
+        }
+      }
+    }
+  }
+  closeDetailPanel();
+}
+
+function deleteProject(){
+  if(!editingProjectId) return;
+  const p=state.projects.find(pr=>pr.id===editingProjectId);
+  if(confirm(`Delete "${p.name}"? Any projects depending on it will be unlinked.`)){
+    // Remove from other projects' deps
+    state.projects.forEach(pr=>{if(pr.deps) pr.deps=pr.deps.filter(d=>d!==editingProjectId);});
+    state.projects=state.projects.filter(pr=>pr.id!==editingProjectId);
+    showToast(`"${p.name}" deleted`);
+    closeDetailPanel();
+  }
+}
+
+// ========== TEAM MODAL ==========
+function openTeamModal(){
+  document.getElementById('teamBackdrop').classList.add('open');
+  document.getElementById('teamModal').classList.add('open');
+  renderTeamList();
+}
+function closeTeamModal(){
+  document.getElementById('teamBackdrop').classList.remove('open');
+  document.getElementById('teamModal').classList.remove('open');
+  renderAll();
+}
+function renderTeamList(){
+  const colors=['#6c5ce7','#0984e3','#00b894','#e74c3c','#f39c12','#fd79a8'];
+  document.getElementById('teamList').innerHTML=state.team.map((m,i)=>{
+    const pc=state.projects.filter(p=>p.team.includes(m)).length;
+    const ini=m.split(' ').map(n=>n[0]).join('').toUpperCase().slice(0,2);
+    return `<div class="team-member-row">
+      <div class="team-member-avatar" style="background:${colors[i%colors.length]}">${ini}</div>
+      <div class="team-member-info">
+        <div class="team-member-name">${m}</div>
+        <div class="team-member-projects">${pc} project${pc!==1?'s':''}</div>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="removeMember('${m}')">Remove</button>
+    </div>`;
+  }).join('');
+}
+function addMember(){
+  const input=document.getElementById('newMemberName'), name=input.value.trim();
+  if(!name) return;
+  if(state.team.includes(name)){showToast('Already exists');return;}
+  state.team.push(name); input.value=''; renderTeamList(); autoSave(); showToast(`${name} added`);
+}
+function removeMember(name){
+  if(confirm(`Remove ${name}?`)){
+    state.team=state.team.filter(m=>m!==name);
+    state.projects.forEach(p=>{p.team=p.team.filter(m=>m!==name);});
+    renderTeamList(); autoSave(); showToast(`${name} removed`);
+  }
+}
+
+// ========== ZOOM ==========
+function setView(view){
+  currentView=view; dayWidth=VIEW_PRESETS[view];
+  updateViewBtns(); renderAll(); scrollToToday();
+}
+function updateViewBtns(){
+  document.querySelectorAll('.view-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.view && VIEW_PRESETS[b.dataset.view]===dayWidth);
+  });
+}
+function zoomIn(){
+  const step=dayWidth<10?2:dayWidth<30?4:dayWidth<60?6:10;
+  dayWidth=Math.min(MAX_DAY_W,dayWidth+step);
+  currentView=null; updateViewBtns(); renderAll();
+}
+function zoomOut(){
+  const step=dayWidth<=10?2:dayWidth<=30?4:dayWidth<=60?6:10;
+  dayWidth=Math.max(MIN_DAY_W,dayWidth-step);
+  currentView=null; updateViewBtns(); renderAll();
+}
+function scrollToToday(){
+  const off=diffDays(getTimelineStart(),todayDate());
+  const w=document.getElementById('ganttWrapper');
+  w.scrollLeft=Math.max(0,off*dayWidth-w.clientWidth/3);
+}
+
+// Cmd+scroll zoom
+document.getElementById('ganttWrapper').addEventListener('wheel',function(e){
+  if(e.metaKey||e.ctrlKey){
+    e.preventDefault();
+    const step=dayWidth<10?1:dayWidth<30?2:4;
+    dayWidth=e.deltaY<0?Math.min(MAX_DAY_W,dayWidth+step):Math.max(MIN_DAY_W,dayWidth-step);
+    currentView=null; updateViewBtns(); renderAll();
+  }
+},{passive:false});
+
+// ========== SUPABASE AUTO-SAVE & REAL-TIME ==========
+function setSyncStatus(status){
+  const el=syncStatusEl();
+  if(!el) return;
+  if(status==='saved'){el.textContent='Saved';el.style.color='var(--success)';}
+  else if(status==='saving'){el.textContent='Saving...';el.style.color='var(--warning)';}
+  else if(status==='synced'){el.textContent='Live sync';el.style.color='var(--success)';}
+  else if(status==='offline'){el.textContent='Offline';el.style.color='var(--danger)';}
+  else if(status==='error'){el.textContent='Sync error';el.style.color='var(--danger)';}
+}
+
+async function autoSave(){
+  const json=JSON.stringify({projects:state.projects,team:state.team,nextId:state.nextId});
+  if(json===lastSavedJSON) return; // no change
+  if(saving){saveQueued=true;return;}
+  saving=true;
+  setSyncStatus('saving');
+  try {
+    const {error}=await supabase.from('scheduler_state').upsert({
+      id:'main',
+      projects:state.projects,
+      team:state.team,
+      next_id:state.nextId,
+      updated_at:new Date().toISOString(),
+      updated_by:'browser'
+    });
+    if(error) throw error;
+    lastSavedJSON=json;
+    setSyncStatus('saved');
+  } catch(e){
+    console.error('Auto-save failed:',e);
+    setSyncStatus('error');
+  }
+  saving=false;
+  if(saveQueued){saveQueued=false;autoSave();}
+}
+
+async function loadFromSupabase(){
+  try {
+    const {data,error}=await supabase.from('scheduler_state').select('*').eq('id','main').single();
+    if(error){
+      if(error.code==='PGRST116'){
+        // No row yet — first time, save current state
+        console.log('No data in Supabase yet, uploading demo data...');
+        await autoSave();
+        return;
+      }
+      throw error;
+    }
+    if(data){
+      state.projects=data.projects||[];
+      state.team=data.team||[];
+      state.nextId=data.next_id||1;
+      lastSavedJSON=JSON.stringify({projects:state.projects,team:state.team,nextId:state.nextId});
+      renderAll();
+      setSyncStatus('synced');
+    }
+  } catch(e){
+    console.error('Load from Supabase failed:',e);
+    setSyncStatus('offline');
+    showToast('Could not connect to database — working offline');
+  }
+}
+
+function subscribeToRealtime(){
+  supabase.channel('scheduler-sync')
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'scheduler_state',filter:'id=eq.main'},
+      (payload)=>{
+        const d=payload.new;
+        if(!d) return;
+        const incomingJSON=JSON.stringify({projects:d.projects,team:d.team,nextId:d.next_id});
+        if(incomingJSON===lastSavedJSON) return; // this is our own save echoing back
+        // Someone else made a change — apply it
+        state.projects=d.projects||[];
+        state.team=d.team||[];
+        state.nextId=d.next_id||1;
+        lastSavedJSON=incomingJSON;
+        renderAll();
+        setSyncStatus('synced');
+        showToast('Schedule updated by another team member');
+      }
+    )
+    .subscribe((status)=>{
+      if(status==='SUBSCRIBED') setSyncStatus('synced');
+      else if(status==='CLOSED'||status==='CHANNEL_ERROR') setSyncStatus('offline');
+    });
+}
+
+// Legacy file export/import (kept as backup)
+function exportData(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`starsound-scheduler-${fmtDate(todayDate())}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+  showToast('Backup exported');
+}
+function importData(event){
+  const file=event.target.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=function(e){
+    try {
+      const d=JSON.parse(e.target.result);
+      if(d.projects&&d.team){
+        state=d;renderAll();autoSave();
+        showToast(`Imported ${state.projects.length} projects`);
+      } else showToast('Invalid file');
+    } catch(err){showToast('Error reading file');}
+  };
+  r.readAsText(file); event.target.value='';
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;
+  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+// ========== SETTINGS & SLACK ==========
+let settings = { slackWebhook:'', slackChannel:'#integrations', notifyAssign:true, notifyMove:true };
+
+function loadSettings(){
+  try {
+    const s = JSON.parse(localStorage.getItem('starsound_settings')||'{}');
+    if(s.slackWebhook) settings = {...settings, ...s};
+  } catch(e){}
+}
+function saveSettingsToStorage(){
+  try { localStorage.setItem('starsound_settings', JSON.stringify(settings)); } catch(e){}
+}
+
+function openSettingsModal(){
+  loadSettings();
+  document.getElementById('settingsBackdrop').classList.add('open');
+  document.getElementById('settingsModal').classList.add('open');
+  document.getElementById('slackWebhook').value=settings.slackWebhook||'';
+  document.getElementById('slackChannelName').value=settings.slackChannel||'';
+  document.getElementById('slackOnAssign').checked=settings.notifyAssign!==false;
+  document.getElementById('slackOnMove').checked=settings.notifyMove!==false;
+}
+function closeSettingsModal(){
+  document.getElementById('settingsBackdrop').classList.remove('open');
+  document.getElementById('settingsModal').classList.remove('open');
+}
+function saveSettings(){
+  settings.slackWebhook=document.getElementById('slackWebhook').value.trim();
+  settings.slackChannel=document.getElementById('slackChannelName').value.trim()||'#integrations';
+  settings.notifyAssign=document.getElementById('slackOnAssign').checked;
+  settings.notifyMove=document.getElementById('slackOnMove').checked;
+  saveSettingsToStorage();
+  showToast('Settings saved');
+  closeSettingsModal();
+}
+
+function testSlack(){
+  const url=document.getElementById('slackWebhook').value.trim();
+  if(!url){showToast('Enter a webhook URL first');return;}
+  sendSlackMessage(url, ':white_check_mark: *Starsound Scheduler connected!*\nSlack notifications are working.').then(ok=>{
+    showToast(ok?'Slack test sent!':'Slack test failed - check URL');
+  });
+}
+
+async function sendSlackMessage(webhookUrl, text){
+  if(!webhookUrl) return false;
+  try {
+    const res = await fetch(webhookUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text})
+    });
+    return res.ok;
+  } catch(e){ console.error('Slack send failed:',e); return false; }
+}
+
+function notifySlackAssignment(projectName, memberNames, phaseName, startDate, endDate){
+  loadSettings();
+  if(!settings.slackWebhook || !settings.notifyAssign) return;
+  const members = memberNames.map(m=>`*${m}*`).join(', ');
+  const phase = phaseName.charAt(0).toUpperCase()+phaseName.slice(1);
+  const msg = `:hammer_and_wrench: *New Assignment — ${projectName}*\n`+
+    `> :bust_in_silhouette: ${members}\n`+
+    `> :clipboard: Phase: ${phase}\n`+
+    `> :calendar: ${startDate} to ${endDate}\n`+
+    `_Assigned via Starsound Integration Scheduler_`;
+  sendSlackMessage(settings.slackWebhook, msg);
+}
+
+function notifySlackDateChange(projectName, newStart, newEnd, dependentCount){
+  loadSettings();
+  if(!settings.slackWebhook || !settings.notifyMove) return;
+  const depMsg = dependentCount>0 ? `\n> :link: ${dependentCount} dependent project${dependentCount>1?'s':''} also shifted` : '';
+  const msg = `:date: *Schedule Change — ${projectName}*\n`+
+    `> :arrow_right: New dates: ${newStart} to ${newEnd}${depMsg}\n`+
+    `_Updated via Starsound Integration Scheduler_`;
+  sendSlackMessage(settings.slackWebhook, msg);
+}
+
+loadSettings();
+
+// ========== SCROLL SYNC ==========
+(function(){
+  const gw=document.getElementById('ganttWrapper');
+  const sr=document.getElementById('sidebarRows');
+  let lock=false;
+  gw.addEventListener('scroll',()=>{
+    if(lock) return; lock=true;
+    // ganttWrapper scrollTop includes sticky header offset, sidebar doesn't have header in scroll
+    const headerH=document.getElementById('ganttHeader')?.offsetHeight||0;
+    sr.scrollTop=Math.max(0, gw.scrollTop);
+    lock=false;
+  });
+  sr.addEventListener('scroll',()=>{
+    if(lock) return; lock=true;
+    gw.scrollTop=sr.scrollTop;
+    lock=false;
+  });
+})();
+
+// ========== KEYBOARD ==========
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){closeDetailPanel();closeTeamModal();}
+  if(e.key==='n'&&!e.metaKey&&!e.ctrlKey&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) openDetailPanel(null);
+});
+
+// ========== DEMO DATA ==========
+function loadDemo(){
+  const t=todayDate();
+  state.projects=[
+    {id:1,name:'Meridian HQ Boardroom',client:'Meridian Health',phase:'install',priority:'high',
+     start:fmtDate(addDays(t,-10)),end:fmtDate(addDays(t,45)),team:['Alex','Jordan'],deps:[],
+     subPhases:[
+       {phase:'design',start:fmtDate(addDays(t,-10)),end:fmtDate(addDays(t,-1)),team:['Jordan']},
+       {phase:'procurement',start:fmtDate(addDays(t,0)),end:fmtDate(addDays(t,7)),team:['Jordan']},
+       {phase:'install',start:fmtDate(addDays(t,14)),end:fmtDate(addDays(t,30)),team:['Alex','Jordan']},
+       {phase:'programming',start:fmtDate(addDays(t,31)),end:fmtDate(addDays(t,40)),team:['Alex']},
+       {phase:'closeout',start:fmtDate(addDays(t,41)),end:fmtDate(addDays(t,45)),team:['Jordan']}
+     ],
+     notes:'Full boardroom AV fit-out. Crestron DigitalMedia, 2x 98" displays, Shure MXA920. Gap day 8-13: waiting on Shure mic delivery.'},
+    {id:2,name:'Apex Trading Floor',client:'Apex Financial',phase:'design',priority:'high',
+     start:fmtDate(addDays(t,5)),end:fmtDate(addDays(t,65)),team:['Sam','Taylor'],deps:[],
+     subPhases:[
+       {phase:'design',start:fmtDate(addDays(t,5)),end:fmtDate(addDays(t,18)),team:['Sam']},
+       {phase:'engineering',start:fmtDate(addDays(t,19)),end:fmtDate(addDays(t,30)),team:['Sam','Taylor']},
+       {phase:'install',start:fmtDate(addDays(t,45)),end:fmtDate(addDays(t,58)),team:['Taylor','Alex']},
+       {phase:'programming',start:fmtDate(addDays(t,59)),end:fmtDate(addDays(t,63)),team:['Sam']},
+       {phase:'closeout',start:fmtDate(addDays(t,64)),end:fmtDate(addDays(t,65)),team:['Taylor']}
+     ],
+     notes:'Video wall (16x Samsung), 40 desk KVM, Dante audio. Gap day 31-44: GC finishing walls & ceiling grid.'},
+    {id:3,name:'Vertex Campus Bldg C',client:'Vertex Labs',phase:'programming',priority:'medium',
+     start:fmtDate(addDays(t,-20)),end:fmtDate(addDays(t,14)),team:['Alex','Sam'],deps:[],
+     subPhases:[
+       {phase:'install',start:fmtDate(addDays(t,-20)),end:fmtDate(addDays(t,-5)),team:['Alex','Sam']},
+       {phase:'programming',start:fmtDate(addDays(t,-4)),end:fmtDate(addDays(t,10)),team:['Sam']},
+       {phase:'closeout',start:fmtDate(addDays(t,11)),end:fmtDate(addDays(t,14)),team:['Alex']}
+     ],
+     notes:'12 huddle rooms + 2 divisible training rooms. Crestron programming & QSC DSP tuning.'},
+    {id:4,name:'Pinnacle Auditorium',client:'Pinnacle Corp',phase:'engineering',priority:'low',
+     start:fmtDate(addDays(t,40)),end:fmtDate(addDays(t,90)),team:['Jordan'],deps:[2],
+     subPhases:[
+       {phase:'engineering',start:fmtDate(addDays(t,40)),end:fmtDate(addDays(t,55)),team:['Jordan']},
+       {phase:'install',start:fmtDate(addDays(t,70)),end:fmtDate(addDays(t,85)),team:['Jordan','Alex']},
+       {phase:'programming',start:fmtDate(addDays(t,86)),end:fmtDate(addDays(t,88)),team:['Sam']},
+       {phase:'closeout',start:fmtDate(addDays(t,89)),end:fmtDate(addDays(t,90)),team:['Jordan']}
+     ],
+     notes:'500-seat auditorium, line array, projection blend. Gap day 56-69: waiting on JBL line array lead time.'},
+    {id:5,name:'Summit Warehouse MOC',client:'Summit Manufacturing',phase:'closeout',priority:'high',
+     start:fmtDate(addDays(t,-5)),end:fmtDate(addDays(t,5)),team:['Taylor','Alex'],deps:[],
+     subPhases:[
+       {phase:'programming',start:fmtDate(addDays(t,-5)),end:fmtDate(addDays(t,-1)),team:['Alex']},
+       {phase:'closeout',start:fmtDate(addDays(t,0)),end:fmtDate(addDays(t,5)),team:['Taylor']}
+     ],
+     notes:'MOC 3x3 video wall, Extron control. Final training & as-builts this week.'},
+    {id:6,name:'Quick Conf Rm Retrofit',client:'Vertex Labs',phase:'install',priority:'medium',
+     start:fmtDate(addDays(t,8)),end:fmtDate(addDays(t,9)),team:['Alex'],deps:[3],
+     subPhases:[
+       {phase:'install',start:fmtDate(addDays(t,8)),end:fmtDate(addDays(t,9)),team:['Alex']}
+     ],
+     notes:'2-day retrofit: swap displays + add USB-C. Fits in Meridian gap while waiting on equipment.'},
+  ];
+  state.nextId=7;
+}
+
+// ========== INIT ==========
+(async function init(){
+  // Try to load from Supabase first
+  loadDemo(); // set demo data as fallback
+  renderAll();
+
+  try {
+    const {data,error}=await supabase.from('scheduler_state').select('*').eq('id','main').single();
+    if(!error && data && data.projects && data.projects.length>0){
+      // Database has data — use it
+      state.projects=data.projects;
+      state.team=data.team||state.team;
+      state.nextId=data.next_id||state.nextId;
+      lastSavedJSON=JSON.stringify({projects:state.projects,team:state.team,nextId:state.nextId});
+      renderAll();
+      setSyncStatus('synced');
+    } else {
+      // No data in DB yet — push demo data up
+      setSyncStatus('saving');
+      await autoSave();
+    }
+  } catch(e){
+    console.warn('Supabase load failed, using local demo data:',e);
+    setSyncStatus('offline');
+  }
+
+  _initialLoadDone=true;
+
+  // Expand first project by default so user can see the feature
+  if(state.projects.length>0) expandedProjects.add(state.projects[0].id);
+  renderAll();
+
+  // Subscribe to real-time changes from other browsers
+  subscribeToRealtime();
+
+  setTimeout(()=>scrollToToday(),100);
+})();
+</script>
+</body>
+</html>
