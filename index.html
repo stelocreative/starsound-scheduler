@@ -157,9 +157,17 @@
   .gantt-sp-bar {
     position:absolute; height:22px; border-radius:4px; z-index:6;
     display:flex; align-items:center; padding:0 6px;
-    font-size:10px; font-weight:500; color:#fff; overflow:hidden;
+    font-size:10px; font-weight:500; color:#fff; overflow:visible;
     white-space:nowrap; text-overflow:ellipsis; opacity:.9;
+    cursor:grab; user-select:none; transition:box-shadow .15s;
   }
+  .gantt-sp-bar:hover { z-index:8; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+  .gantt-sp-bar.dragging { opacity:.85; cursor:grabbing; z-index:20; box-shadow:0 8px 32px rgba(0,0,0,.5); }
+  .gantt-sp-bar .sp-resize-handle {
+    position:absolute; top:0; bottom:0; width:8px; cursor:col-resize; z-index:2;
+  }
+  .gantt-sp-bar .sp-resize-handle.left { left:0; }
+  .gantt-sp-bar .sp-resize-handle.right { right:0; }
 
   /* GANTT AREA */
   .gantt-wrapper { flex:1; overflow:auto; position:relative; }
@@ -322,6 +330,65 @@
     background:var(--bg); border:1px solid var(--border); color:var(--text-dim); transition:all .15s;
   }
   .sp-team-chip.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  /* SUB-PHASE EXPANDED FIELDS */
+  .sp-fields { margin-top:6px; padding:4px 0 0 14px; display:flex; flex-direction:column; gap:4px; }
+  .sp-fields textarea, .sp-fields input[type="text"] {
+    width:100%; padding:5px 7px; background:var(--bg); border:1px solid var(--border); border-radius:5px;
+    color:var(--text); font-size:11px; font-family:inherit; resize:vertical; min-height:28px; outline:none;
+  }
+  .sp-fields textarea:focus, .sp-fields input[type="text"]:focus { border-color:var(--accent); }
+  .sp-field-label { font-size:9px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:.3px; margin-top:2px; }
+  .sp-expand-btn {
+    font-size:9px; color:var(--accent-light); background:none; border:none; cursor:pointer; padding:2px 0;
+    text-align:left; font-family:inherit;
+  }
+  .sp-expand-btn:hover { text-decoration:underline; }
+
+  /* CHECKLIST */
+  .sp-checklist { margin-top:2px; }
+  .sp-check-item {
+    display:flex; align-items:center; gap:5px; padding:2px 0; font-size:11px;
+  }
+  .sp-check-item input[type="checkbox"] { accent-color:var(--accent); cursor:pointer; flex-shrink:0; }
+  .sp-check-item .check-text { flex:1; }
+  .sp-check-item .check-text.done { text-decoration:line-through; color:var(--text-dim); }
+  .sp-check-item .check-remove {
+    background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:11px; padding:0 2px;
+    opacity:.5; transition:opacity .15s;
+  }
+  .sp-check-item .check-remove:hover { opacity:1; color:var(--danger); }
+  .sp-check-add {
+    font-size:10px; color:var(--accent-light); background:none; border:none; cursor:pointer;
+    padding:2px 0; font-family:inherit;
+  }
+  .sp-check-add:hover { text-decoration:underline; }
+  .sp-progress-bar {
+    height:3px; background:var(--border); border-radius:2px; margin-top:3px; overflow:hidden;
+  }
+  .sp-progress-fill { height:100%; background:var(--success); border-radius:2px; transition:width .2s; }
+
+  /* FILE ATTACHMENTS */
+  .sp-files, .project-files { margin-top:4px; }
+  .file-list { display:flex; flex-direction:column; gap:3px; margin-bottom:4px; }
+  .file-item {
+    display:flex; align-items:center; gap:6px; padding:4px 7px; background:var(--bg);
+    border:1px solid var(--border); border-radius:5px; font-size:11px;
+  }
+  .file-item .file-icon { flex-shrink:0; font-size:12px; }
+  .file-item .file-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--accent-light); cursor:pointer; }
+  .file-item .file-name:hover { text-decoration:underline; }
+  .file-item .file-size { font-size:9px; color:var(--text-dim); flex-shrink:0; }
+  .file-item .file-remove {
+    background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:12px;
+    opacity:.5; padding:0 2px;
+  }
+  .file-item .file-remove:hover { opacity:1; color:var(--danger); }
+  .file-upload-btn {
+    font-size:10px; color:var(--accent-light); background:none; border:1px dashed var(--border);
+    border-radius:5px; padding:4px 10px; cursor:pointer; font-family:inherit; transition:all .15s;
+  }
+  .file-upload-btn:hover { border-color:var(--accent); color:var(--accent); }
 
   .detail-panel-footer {
     padding:14px 18px; border-top:1px solid var(--border);
@@ -506,6 +573,14 @@
         <div class="dep-chips" id="depChips"></div>
         <div style="font-size:10px;color:var(--text-dim);margin-top:4px">
           Select projects that must finish before this one starts. Moving a parent auto-shifts this project.
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Project Documents <span style="font-weight:400;text-transform:none">(invoices, CADs, material lists, submittals)</span></label>
+        <div class="project-files">
+          <div class="file-list" id="projectFileList"></div>
+          <button class="file-upload-btn" onclick="document.getElementById('projectFileInput').click()">+ Upload Document</button>
+          <input type="file" id="projectFileInput" multiple style="display:none" onchange="handleProjectFileUpload(event)">
         </div>
       </div>
       <div class="form-group">
@@ -1001,10 +1076,13 @@ function renderGantt(conflictNames) {
       const teamLabel=(sp.team&&sp.team.length>0)?' \u2022 '+sp.team.join(', '):'';
       const showLabel=w>60;
 
-      bHTML+=`<div class="gantt-sp-bar"
+      bHTML+=`<div class="gantt-sp-bar" data-pid="${r.project.id}" data-spidx="${r.spIdx}"
         title="${phaseName}: ${sp.start} to ${sp.end} (${dur}d)${teamLabel}"
-        style="left:${left}px;width:${w}px;top:${top}px;background:${phaseColors[sp.phase]}">
-        ${showLabel?phaseName:''}
+        style="left:${left}px;width:${w}px;top:${top}px;background:${phaseColors[sp.phase]}"
+        onmousedown="startSpDrag(event,${r.project.id},${r.spIdx})" ondblclick="openDetailPanel(${r.project.id})">
+        <span style="pointer-events:none;overflow:hidden;text-overflow:ellipsis">${showLabel?phaseName:''}</span>
+        <div class="sp-resize-handle left" onmousedown="startSpResize(event,${r.project.id},${r.spIdx},'left')"></div>
+        <div class="sp-resize-handle right" onmousedown="startSpResize(event,${r.project.id},${r.spIdx},'right')"></div>
       </div>`;
     }
   });
@@ -1111,6 +1189,80 @@ function endDrag(e){
   if(daysDelta!==0) notifySlackDateChange(project.name, project.start, project.end, depCount);
 }
 
+// ========== SUB-PHASE DRAG & RESIZE ==========
+let spDragState = null;
+
+function startSpDrag(e, projectId, spIdx) {
+  if (e.target.classList.contains('sp-resize-handle')) return;
+  e.preventDefault();
+  const bar = document.querySelector(`.gantt-sp-bar[data-pid="${projectId}"][data-spidx="${spIdx}"]`);
+  if (!bar) return;
+  spDragState = { type: 'move', projectId, spIdx, startX: e.clientX, origLeft: parseFloat(bar.style.left), origWidth: parseFloat(bar.style.width), bar };
+  bar.classList.add('dragging');
+  document.addEventListener('mousemove', onSpDrag);
+  document.addEventListener('mouseup', endSpDrag);
+}
+
+function startSpResize(e, projectId, spIdx, side) {
+  e.preventDefault(); e.stopPropagation();
+  const bar = document.querySelector(`.gantt-sp-bar[data-pid="${projectId}"][data-spidx="${spIdx}"]`);
+  if (!bar) return;
+  spDragState = { type: 'resize', side, projectId, spIdx, startX: e.clientX, origLeft: parseFloat(bar.style.left), origWidth: parseFloat(bar.style.width), bar };
+  bar.classList.add('dragging');
+  document.addEventListener('mousemove', onSpDrag);
+  document.addEventListener('mouseup', endSpDrag);
+}
+
+function onSpDrag(e) {
+  if (!spDragState) return;
+  const dx = e.clientX - spDragState.startX;
+  const { bar } = spDragState;
+  if (spDragState.type === 'move') {
+    bar.style.left = (spDragState.origLeft + dx) + 'px';
+  } else {
+    if (spDragState.side === 'right') {
+      bar.style.width = Math.max(dayWidth, spDragState.origWidth + dx) + 'px';
+    } else {
+      bar.style.left = (spDragState.origLeft + dx) + 'px';
+      bar.style.width = Math.max(dayWidth, spDragState.origWidth - dx) + 'px';
+    }
+  }
+}
+
+function endSpDrag(e) {
+  if (!spDragState) return;
+  document.removeEventListener('mousemove', onSpDrag);
+  document.removeEventListener('mouseup', endSpDrag);
+  const { bar, projectId, spIdx } = spDragState;
+  bar.classList.remove('dragging');
+
+  const tlStart = getTimelineStart();
+  const project = state.projects.find(p => p.id === projectId);
+  if (!project || !project.subPhases || !project.subPhases[spIdx]) { spDragState = null; return; }
+
+  const sp = project.subPhases[spIdx];
+  const newLeft = parseFloat(bar.style.left);
+  const newWidth = parseFloat(bar.style.width);
+  const startDayOff = Math.round(newLeft / dayWidth);
+  const durDays = Math.max(1, Math.round(newWidth / dayWidth));
+  const newStart = addDays(tlStart, startDayOff);
+  const newEnd = addDays(newStart, durDays - 1);
+
+  sp.start = fmtDate(newStart);
+  sp.end = fmtDate(newEnd);
+
+  // Auto-expand parent project dates if sub-phase exceeds them
+  const projStart = parseDate(project.start);
+  const projEnd = parseDate(project.end);
+  if (newStart < projStart) project.start = fmtDate(newStart);
+  if (newEnd > projEnd) project.end = fmtDate(newEnd);
+
+  const phaseName = sp.phase.charAt(0).toUpperCase() + sp.phase.slice(1);
+  spDragState = null;
+  renderAll();
+  showToast(`${phaseName} → ${sp.start} – ${sp.end}`);
+}
+
 // ========== DETAIL PANEL ==========
 function openDetailPanel(id){
   editingProjectId=id;
@@ -1129,9 +1281,12 @@ function openDetailPanel(id){
     document.getElementById('pEnd').value=fmtDate(addDays(todayDate(),30));
     document.getElementById('pNotes').value='';
     editSubPhases=[];
+    editProjectFiles=[];
+    spExpandedSet.clear();
     renderTeamChips([]);
     renderDepChips([], null);
     renderSubPhaseList();
+    renderProjectFileList();
   } else {
     const p=state.projects.find(pr=>pr.id===id);
     if(!p) return;
@@ -1144,10 +1299,13 @@ function openDetailPanel(id){
     document.getElementById('pStart').value=p.start;
     document.getElementById('pEnd').value=p.end;
     document.getElementById('pNotes').value=p.notes||'';
-    editSubPhases=(p.subPhases||[]).map(s=>({...s}));
+    editSubPhases=(p.subPhases||[]).map(s=>({...s,checklist:(s.checklist||[]).map(c=>({...c})),files:(s.files||[]).map(f=>({...f}))}));
+    editProjectFiles=(p.files||[]).map(f=>({...f}));
+    spExpandedSet.clear();
     renderTeamChips(p.team);
     renderDepChips(p.deps||[], id);
     renderSubPhaseList();
+    renderProjectFileList();
   }
   overlay.classList.add('open');
   renderAll();
@@ -1188,6 +1346,12 @@ function renderSubPhaseList(){
   const phaseColorMap={design:'#6c5ce7',engineering:'#0984e3',procurement:'#f39c12',install:'#00b894',programming:'#fd79a8',closeout:'#e74c3c'};
   container.innerHTML=editSubPhases.map((sp,i)=>{
     const spTeam = sp.team || [];
+    const checklist = sp.checklist || [];
+    const doneCount = checklist.filter(c=>c.done).length;
+    const totalCount = checklist.length;
+    const pctDone = totalCount>0 ? Math.round(doneCount/totalCount*100) : 0;
+    const isExpanded = spExpandedSet.has(i);
+    const files = sp.files || [];
     return `<div class="sub-phase-row">
       <div class="sp-top">
         <div class="sp-dot" style="background:${phaseColorMap[sp.phase]||'#888'}"></div>
@@ -1197,11 +1361,47 @@ function renderSubPhaseList(){
         <input type="date" value="${sp.start}" onchange="editSubPhases[${i}].start=this.value">
         <span style="color:var(--text-dim);font-size:10px">to</span>
         <input type="date" value="${sp.end}" onchange="editSubPhases[${i}].end=this.value">
+        ${totalCount>0?`<span style="font-size:9px;color:${pctDone===100?'var(--success)':'var(--text-dim)'};white-space:nowrap">${doneCount}/${totalCount}</span>`:''}
         <button class="sp-remove" onclick="editSubPhases.splice(${i},1);renderSubPhaseList()">&times;</button>
       </div>
+      ${totalCount>0?`<div class="sp-progress-bar"><div class="sp-progress-fill" style="width:${pctDone}%"></div></div>`:''}
       <div class="sp-team">
         ${state.team.map(m=>`<span class="sp-team-chip ${spTeam.includes(m)?'active':''}" onclick="toggleSpTeam(${i},'${m}')">${m}</span>`).join('')}
       </div>
+      <button class="sp-expand-btn" onclick="toggleSpExpand(${i})">${isExpanded?'&#9660; Hide details':'&#9654; Description, scope, checklist & files'}</button>
+      ${isExpanded?`<div class="sp-fields">
+        <div class="sp-field-label">Description</div>
+        <textarea rows="2" placeholder="What's happening in this phase..." onchange="editSubPhases[${i}].description=this.value">${sp.description||''}</textarea>
+        <div class="sp-field-label">Scope of Work</div>
+        <textarea rows="2" placeholder="Specific scope details, deliverables..." onchange="editSubPhases[${i}].scope=this.value">${sp.scope||''}</textarea>
+        <div class="sp-field-label">Materials / Equipment Needed</div>
+        <textarea rows="2" placeholder="Equipment list, part numbers, quantities..." onchange="editSubPhases[${i}].materials=this.value">${sp.materials||''}</textarea>
+        <div class="sp-field-label">Completion Checklist</div>
+        <div class="sp-checklist">
+          ${checklist.map((c,ci)=>`<div class="sp-check-item">
+            <input type="checkbox" ${c.done?'checked':''} onchange="toggleCheckItem(${i},${ci})">
+            <span class="check-text ${c.done?'done':''}">${c.text}</span>
+            <button class="check-remove" onclick="removeCheckItem(${i},${ci})">&times;</button>
+          </div>`).join('')}
+          <div style="display:flex;gap:4px;align-items:center;margin-top:2px">
+            <input type="text" id="newCheck_${i}" placeholder="Add checklist item..." style="flex:1;font-size:10px;padding:3px 6px"
+              onkeydown="if(event.key==='Enter'){addCheckItem(${i},this.value);this.value='';}">
+            <button class="sp-check-add" onclick="addCheckItem(${i},document.getElementById('newCheck_${i}').value);document.getElementById('newCheck_${i}').value=''">+ Add</button>
+          </div>
+          ${totalCount===0?`<button class="sp-check-add" style="margin-top:2px" onclick="loadDefaultChecklist(${i})">Load typical ${sp.phase} checklist</button>`:''}
+        </div>
+        <div class="sp-field-label">Attached Files</div>
+        <div class="sp-files">
+          <div class="file-list">${files.map((f,fi)=>`<div class="file-item">
+            <span class="file-icon">${getFileIcon(f.name)}</span>
+            <span class="file-name" onclick="window.open('${f.url}','_blank')">${f.name}</span>
+            <span class="file-size">${formatFileSize(f.size)}</span>
+            <button class="file-remove" onclick="removeSpFile(${i},${fi})">&times;</button>
+          </div>`).join('')}</div>
+          <button class="file-upload-btn" onclick="document.getElementById('spFileInput_${i}').click()">+ Attach File</button>
+          <input type="file" id="spFileInput_${i}" multiple style="display:none" onchange="handleSpFileUpload(event,${i})">
+        </div>
+      </div>`:''}
     </div>`;
   }).join('');
 }
@@ -1233,8 +1433,152 @@ function addSubPhaseRow(){
   for(const ph of phaseOrder){
     if(!usedPhases.includes(ph)){nextPhase=ph;break;}
   }
-  editSubPhases.push({phase:nextPhase,start,end,team:[]});
+  editSubPhases.push({phase:nextPhase,start,end,team:[],description:'',scope:'',materials:'',checklist:[],files:[]});
+  spExpandedSet.add(editSubPhases.length-1); // auto-expand new blocks
   renderSubPhaseList();
+}
+
+// ========== SUB-PHASE EXPANDED STATE & HELPERS ==========
+const spExpandedSet = new Set();
+
+function toggleSpExpand(idx){
+  if(spExpandedSet.has(idx)) spExpandedSet.delete(idx); else spExpandedSet.add(idx);
+  renderSubPhaseList();
+}
+
+function toggleCheckItem(spIdx, checkIdx){
+  const cl=editSubPhases[spIdx].checklist;
+  if(cl&&cl[checkIdx]) cl[checkIdx].done=!cl[checkIdx].done;
+  renderSubPhaseList();
+}
+
+function addCheckItem(spIdx, text){
+  if(!text||!text.trim()) return;
+  if(!editSubPhases[spIdx].checklist) editSubPhases[spIdx].checklist=[];
+  editSubPhases[spIdx].checklist.push({text:text.trim(),done:false});
+  renderSubPhaseList();
+}
+
+function removeCheckItem(spIdx, checkIdx){
+  editSubPhases[spIdx].checklist.splice(checkIdx,1);
+  renderSubPhaseList();
+}
+
+const defaultChecklists = {
+  design: ['Site survey complete','System design drafted','Client design review','Design approved / signed off','Drawings submitted to engineering'],
+  engineering: ['Shop drawings complete','Cable schedule done','Rack elevation drawn','Network diagram complete','Engineering review passed'],
+  procurement: ['Bill of materials finalized','PO submitted','Vendor confirmations received','Equipment shipped','Equipment received & inspected'],
+  install: ['Rack(s) built','Cable pathways prepped','Cables pulled','Cables terminated','Speakers / displays mounted','Equipment racked & wired','Power verified'],
+  programming: ['Control code written','Touch panel GUI designed','DSP configuration done','AV switching tested','On-site commissioning','User acceptance test passed'],
+  closeout: ['Punch list generated','Punch items resolved','Client training delivered','As-built drawings updated','O&M manuals delivered','Final sign-off obtained']
+};
+
+function loadDefaultChecklist(spIdx){
+  const phase=editSubPhases[spIdx].phase;
+  const items=(defaultChecklists[phase]||['Task 1','Task 2','Task 3']).map(t=>({text:t,done:false}));
+  editSubPhases[spIdx].checklist=items;
+  renderSubPhaseList();
+}
+
+function getFileIcon(name){
+  const ext=(name||'').split('.').pop().toLowerCase();
+  if(['pdf'].includes(ext)) return '&#128196;';
+  if(['jpg','jpeg','png','gif','webp','svg'].includes(ext)) return '&#128247;';
+  if(['dwg','dxf','rvt'].includes(ext)) return '&#128208;';
+  if(['xls','xlsx','csv'].includes(ext)) return '&#128202;';
+  if(['doc','docx'].includes(ext)) return '&#128221;';
+  if(['zip','rar','7z'].includes(ext)) return '&#128230;';
+  return '&#128196;';
+}
+
+function formatFileSize(bytes){
+  if(!bytes) return '';
+  if(bytes<1024) return bytes+'B';
+  if(bytes<1048576) return Math.round(bytes/1024)+'KB';
+  return (bytes/1048576).toFixed(1)+'MB';
+}
+
+// ========== FILE UPLOAD (SUPABASE STORAGE) ==========
+const STORAGE_BUCKET = 'project-files';
+
+async function uploadToSupabase(file, path){
+  try {
+    const {data,error} = await sbClient.storage.from(STORAGE_BUCKET).upload(path, file, {upsert:true});
+    if(error) throw error;
+    const {data:urlData} = sbClient.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+    return {name:file.name, size:file.size, url:urlData.publicUrl, path};
+  } catch(e){
+    console.error('Upload failed:',e);
+    showToast('Upload failed: '+e.message);
+    return null;
+  }
+}
+
+async function handleSpFileUpload(event, spIdx){
+  const files = event.target.files;
+  if(!files||files.length===0) return;
+  const projectId = editingProjectId || 'new';
+  if(!editSubPhases[spIdx].files) editSubPhases[spIdx].files=[];
+  for(const file of files){
+    const ts=Date.now();
+    const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=`p${projectId}/sp${spIdx}/${ts}_${safeName}`;
+    showToast(`Uploading ${file.name}...`);
+    const result = await uploadToSupabase(file, path);
+    if(result) editSubPhases[spIdx].files.push(result);
+  }
+  event.target.value='';
+  renderSubPhaseList();
+  showToast('Files attached');
+}
+
+function removeSpFile(spIdx, fileIdx){
+  const f=editSubPhases[spIdx].files[fileIdx];
+  if(f&&f.path){
+    sbClient.storage.from(STORAGE_BUCKET).remove([f.path]).catch(e=>console.warn('File delete:',e));
+  }
+  editSubPhases[spIdx].files.splice(fileIdx,1);
+  renderSubPhaseList();
+}
+
+// Project-level file uploads
+let editProjectFiles = [];
+
+async function handleProjectFileUpload(event){
+  const files = event.target.files;
+  if(!files||files.length===0) return;
+  const projectId = editingProjectId || 'new';
+  for(const file of files){
+    const ts=Date.now();
+    const safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const path=`p${projectId}/docs/${ts}_${safeName}`;
+    showToast(`Uploading ${file.name}...`);
+    const result = await uploadToSupabase(file, path);
+    if(result) editProjectFiles.push(result);
+  }
+  event.target.value='';
+  renderProjectFileList();
+  showToast('Documents attached');
+}
+
+function removeProjectFile(fileIdx){
+  const f=editProjectFiles[fileIdx];
+  if(f&&f.path){
+    sbClient.storage.from(STORAGE_BUCKET).remove([f.path]).catch(e=>console.warn('File delete:',e));
+  }
+  editProjectFiles.splice(fileIdx,1);
+  renderProjectFileList();
+}
+
+function renderProjectFileList(){
+  const el=document.getElementById('projectFileList');
+  if(!el) return;
+  el.innerHTML=editProjectFiles.map((f,fi)=>`<div class="file-item">
+    <span class="file-icon">${getFileIcon(f.name)}</span>
+    <span class="file-name" onclick="window.open('${f.url}','_blank')">${f.name}</span>
+    <span class="file-size">${formatFileSize(f.size)}</span>
+    <button class="file-remove" onclick="removeProjectFile(${fi})">&times;</button>
+  </div>`).join('');
 }
 
 function getSelectedTeam(){
@@ -1259,6 +1603,7 @@ function saveProject(){
     team:getSelectedTeam(),
     deps:getSelectedDeps(),
     subPhases:editSubPhases.filter(sp=>sp.start&&sp.end),
+    files:editProjectFiles,
     notes:document.getElementById('pNotes').value.trim()
   };
 
